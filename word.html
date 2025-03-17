@@ -34,7 +34,7 @@
       margin: 10px;
       min-height: 50px;
     }
-    /* 答案區：以虛線框格呈現 */
+    /* 答案區：以虛線框呈現 */
     #answerContainer {
       border: 2px dashed #ccc;
       padding: 10px;
@@ -74,7 +74,8 @@
     /* 灑花容器與動畫 */
     #confetti-container {
       position: fixed;
-      top: 0; left: 0;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       pointer-events: none;
@@ -121,6 +122,11 @@
     let originalSentence = "";
     let letterArray = []; // 原始字詞資料 [{id, char}, ...]
     
+    // 觸控拖拉相關全域變數
+    let currentDragged = null;
+    let offsetX = 0;
+    let offsetY = 0;
+    
     // Fisher-Yates 洗牌演算法
     function shuffleArray(array) {
       for (let i = array.length - 1; i > 0; i--) {
@@ -151,50 +157,7 @@
       }
     }
     
-    // 遊戲啟動：取得輸入句子，建立題目與答案區
-    function startGame() {
-      originalSentence = document.getElementById("inputSentence").value.trim();
-      if (!originalSentence) {
-        alert("請先輸入句子！");
-        return;
-      }
-      
-      // 將句子拆解成字，並建立包含唯一 id 的陣列
-      letterArray = originalSentence.split("").map((char, index) => {
-        return { id: "letter-" + index, char: char };
-      });
-      
-      // 打亂順序（複製一份用於題目區）
-      let shuffledArray = shuffleArray(letterArray.slice());
-      
-      // 清空題目與答案容器
-      const scrambledContainer = document.getElementById("scrambledContainer");
-      const answerContainer = document.getElementById("answerContainer");
-      scrambledContainer.innerHTML = "";
-      answerContainer.innerHTML = "";
-      
-      // 在題目區建立可拖拉字詞
-      shuffledArray.forEach(letter => {
-        const btn = createDraggableElement(letter);
-        scrambledContainer.appendChild(btn);
-      });
-      
-      // 根據原始句子長度，在答案區建立對應的虛線框格
-      for (let i = 0; i < originalSentence.length; i++) {
-        let slot = document.createElement("div");
-        slot.className = "answer-slot";
-        slot.dataset.index = i;
-        slot.addEventListener("dragover", dragOverHandler);
-        slot.addEventListener("drop", dropOnAnswerHandler);
-        answerContainer.appendChild(slot);
-      }
-      
-      // 題目區也設定為可放置區（方便拖回）
-      scrambledContainer.addEventListener("dragover", dragOverHandler);
-      scrambledContainer.addEventListener("drop", dropOnScrambledHandler);
-    }
-    
-    // 建立可拖拉的字詞元素
+    // 建立可拖拉字詞元素，並加入滑鼠與觸控事件
     function createDraggableElement(letter) {
       let btn = document.createElement("button");
       btn.className = "draggable";
@@ -202,12 +165,17 @@
       btn.innerText = letter.char;
       btn.setAttribute("draggable", "true");
       btn.addEventListener("dragstart", dragStartHandler);
+      
+      // 觸控事件支援
+      btn.addEventListener("touchstart", touchStartHandler, {passive: false});
+      btn.addEventListener("touchmove", touchMoveHandler, {passive: false});
+      btn.addEventListener("touchend", touchEndHandler, {passive: false});
+      
       return btn;
     }
     
-    // 拖拉開始：播放該字的語音
+    // 滑鼠拖拉開始：播放該字的語音
     function dragStartHandler(e) {
-      // 若已鎖定則不允許拖拉
       if (e.target.getAttribute("draggable") === "false") {
         e.preventDefault();
         return;
@@ -221,18 +189,20 @@
       e.preventDefault();
     }
     
-    // 當拖拉字詞放到答案框上
-    function dropOnAnswerHandler(e) {
+    // 修改 dropOnAnswerHandler，增加可接受傳入的 draggedElement 參數
+    function dropOnAnswerHandler(e, draggedElement) {
       e.preventDefault();
       const slot = e.currentTarget;
+      if (!draggedElement) {
+        const letterId = e.dataTransfer.getData("text/plain");
+        draggedElement = document.getElementById(letterId);
+      }
       
-      // 如果此答案格已有字詞，檢查是否為錯誤答案
+      // 若答案格已有字詞，且答案正確則不允許更換；若是錯誤則先移回題目區
       if (slot.children.length > 0) {
         if (slot.classList.contains("correct")) {
-          // 正確答案不可替換
           return;
         } else {
-          // 若是錯誤答案，先將原字詞移回題目區
           let existingLetter = slot.firstElementChild;
           existingLetter.style.backgroundColor = "";
           existingLetter.style.border = "";
@@ -242,21 +212,15 @@
         }
       }
       
-      // 從資料傳遞取得拖拉字詞 id
-      const letterId = e.dataTransfer.getData("text/plain");
-      const letterElement = document.getElementById(letterId);
-      slot.appendChild(letterElement);
-      // 設定拖拉後的樣式
-      letterElement.style.backgroundColor = "transparent";
-      letterElement.style.border = "none";
+      slot.appendChild(draggedElement);
+      draggedElement.style.backgroundColor = "transparent";
+      draggedElement.style.border = "none";
       
-      // 檢查該位置的正確性
       const index = parseInt(slot.dataset.index);
-      if(letterElement.innerText === originalSentence[index]) {
+      if (draggedElement.innerText === originalSentence[index]) {
         slot.classList.remove("incorrect");
         slot.classList.add("correct");
-        // 鎖定正確字詞，避免後續更換
-        letterElement.setAttribute("draggable", "false");
+        draggedElement.setAttribute("draggable", "false");
         playSound("correctSound");
       } else {
         slot.classList.remove("correct");
@@ -265,30 +229,111 @@
       }
     }
     
-    // 當拖拉字詞放回題目區
-    function dropOnScrambledHandler(e) {
+    // 修改 dropOnScrambledHandler，同樣增加可接受 draggedElement 參數
+    function dropOnScrambledHandler(e, draggedElement) {
       e.preventDefault();
       const scrambledContainer = document.getElementById("scrambledContainer");
-      const letterId = e.dataTransfer.getData("text/plain");
-      const letterElement = document.getElementById(letterId);
-      
-      // 若原先在答案區，則清除該格的樣式
-      const parent = letterElement.parentElement;
+      if (!draggedElement) {
+        const letterId = e.dataTransfer.getData("text/plain");
+        draggedElement = document.getElementById(letterId);
+      }
+      // 若原先在答案區，清除其樣式
+      const parent = draggedElement.parentElement;
       if (parent && parent.classList.contains("answer-slot")) {
         parent.classList.remove("correct", "incorrect");
       }
-      // 恢復按鈕樣式並放回題目區
-      letterElement.style.backgroundColor = "";
-      letterElement.style.border = "";
-      scrambledContainer.appendChild(letterElement);
+      draggedElement.style.backgroundColor = "";
+      draggedElement.style.border = "";
+      scrambledContainer.appendChild(draggedElement);
     }
     
-    // 送出答案：僅在按下「送出答案」時檢查答案
-    // 答對時，依序執行：
-    // 1. 播放成功音效與灑花動畫
-    // 2. 說出「恭喜你答對了。」
-    // 3. 說出「正確的句字是」，再說出原本正確排列的句子
-    // 答錯時，則說出：「對不起，你答錯了，請再試一次」
+    // 觸控事件處理
+    function touchStartHandler(e) {
+      e.preventDefault();
+      currentDragged = e.target;
+      let touch = e.touches[0];
+      let rect = currentDragged.getBoundingClientRect();
+      offsetX = touch.clientX - rect.left;
+      offsetY = touch.clientY - rect.top;
+      currentDragged.style.position = "absolute";
+      currentDragged.style.zIndex = 1000;
+      speak(currentDragged.innerText);
+    }
+    
+    function touchMoveHandler(e) {
+      e.preventDefault();
+      if (!currentDragged) return;
+      let touch = e.touches[0];
+      currentDragged.style.left = (touch.clientX - offsetX) + "px";
+      currentDragged.style.top = (touch.clientY - offsetY) + "px";
+    }
+    
+    function touchEndHandler(e) {
+      e.preventDefault();
+      if (!currentDragged) return;
+      let touch = e.changedTouches[0];
+      let dropTarget = document.elementFromPoint(touch.clientX, touch.clientY);
+      // 往上找尋是否為有效的放置區域（答案格或題目區）
+      while (dropTarget && !dropTarget.classList.contains("answer-slot") && dropTarget.id !== "scrambledContainer") {
+        dropTarget = dropTarget.parentElement;
+      }
+      if (dropTarget) {
+        if (dropTarget.classList.contains("answer-slot")) {
+          dropOnAnswerHandler({ currentTarget: dropTarget, preventDefault: function(){} }, currentDragged);
+        } else if (dropTarget.id === "scrambledContainer") {
+          dropOnScrambledHandler({ preventDefault: function(){} }, currentDragged);
+        }
+      } else {
+        // 若無有效放置區，預設返回題目區
+        let scrambledContainer = document.getElementById("scrambledContainer");
+        dropOnScrambledHandler({ preventDefault: function(){} }, currentDragged);
+      }
+      // 重置樣式
+      currentDragged.style.position = "";
+      currentDragged.style.zIndex = "";
+      currentDragged.style.left = "";
+      currentDragged.style.top = "";
+      currentDragged = null;
+    }
+    
+    // 遊戲啟動：取得輸入句子，建立題目與答案區
+    function startGame() {
+      originalSentence = document.getElementById("inputSentence").value.trim();
+      if (!originalSentence) {
+        alert("請先輸入句子！");
+        return;
+      }
+      
+      letterArray = originalSentence.split("").map((char, index) => {
+        return { id: "letter-" + index, char: char };
+      });
+      
+      let shuffledArray = shuffleArray(letterArray.slice());
+      
+      const scrambledContainer = document.getElementById("scrambledContainer");
+      const answerContainer = document.getElementById("answerContainer");
+      scrambledContainer.innerHTML = "";
+      answerContainer.innerHTML = "";
+      
+      shuffledArray.forEach(letter => {
+        const btn = createDraggableElement(letter);
+        scrambledContainer.appendChild(btn);
+      });
+      
+      for (let i = 0; i < originalSentence.length; i++) {
+        let slot = document.createElement("div");
+        slot.className = "answer-slot";
+        slot.dataset.index = i;
+        slot.addEventListener("dragover", dragOverHandler);
+        slot.addEventListener("drop", dropOnAnswerHandler);
+        answerContainer.appendChild(slot);
+      }
+      
+      scrambledContainer.addEventListener("dragover", dragOverHandler);
+      scrambledContainer.addEventListener("drop", dropOnScrambledHandler);
+    }
+    
+    // 送出答案：若答案正確，依序執行成功動畫與語音流程；若答案錯誤則提示錯誤訊息
     function submitAnswer() {
       const answerContainer = document.getElementById("answerContainer");
       let slots = answerContainer.children;
@@ -301,28 +346,24 @@
         }
       }
       if (complete) {
-        // 先播放成功動畫與音效
         playSound("successSound");
         showConfetti();
         
-        // 建立連續語音的各段訊息
         let utterance1 = new SpeechSynthesisUtterance("恭喜你答對了。");
         let utterance2 = new SpeechSynthesisUtterance("正確的句字是");
         let utterance3 = new SpeechSynthesisUtterance(originalSentence);
         
-        // 設定語言與嘗試使用語言為 zh-TW 且名稱中包含 "Google" 的語音
         utterance1.lang = "zh-TW";
         utterance2.lang = "zh-TW";
         utterance3.lang = "zh-TW";
         let voices = window.speechSynthesis.getVoices();
         let selectedVoice = voices.find(v => v.lang === 'zh-TW' && v.name.includes("Google"));
-        if(selectedVoice){
+        if (selectedVoice) {
           utterance1.voice = selectedVoice;
           utterance2.voice = selectedVoice;
           utterance3.voice = selectedVoice;
         }
         
-        // 以連鎖方式依序播放語音
         utterance1.onend = function() {
           window.speechSynthesis.speak(utterance2);
         };
@@ -338,7 +379,7 @@
     // 顯示灑花動畫：confetti 從畫面隨機位置出現，由小變大後淡出
     function showConfetti() {
       const confettiContainer = document.getElementById("confetti-container");
-      for(let i = 0; i < 100; i++){
+      for (let i = 0; i < 100; i++) {
         let confetti = document.createElement("div");
         confetti.className = "confetti";
         confetti.style.left = Math.random() * window.innerWidth + "px";
@@ -366,7 +407,7 @@
       return colors[Math.floor(Math.random() * colors.length)];
     }
     
-    // 為了確保語音清單正確加載，監聽 voiceschanged 事件
+    // 監聽 voiceschanged 事件，確保語音清單正確加載
     window.speechSynthesis.onvoiceschanged = function() {
       window.speechSynthesis.getVoices();
     };
