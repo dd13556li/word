@@ -104,6 +104,9 @@
     
     <h3>你的答案</h3>
     <div id="answerContainer" class="dropzone"></div>
+    
+    <!-- 新增送出答案按鈕 -->
+    <button onclick="submitAnswer()">送出答案</button>
   </div>
   
   <div id="confetti-container"></div>
@@ -127,9 +130,14 @@
       return array;
     }
     
-    // 使用 Web Speech API 播放語音
+    // 使用 Web Speech API 播放語音，嘗試使用語言為 zh-TW 且名稱中包含 "Google" 的語音
     function speak(text) {
       let utterance = new SpeechSynthesisUtterance(text);
+      let voices = window.speechSynthesis.getVoices();
+      let selectedVoice = voices.find(v => v.lang === 'zh-TW' && v.name.includes("Google"));
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+      }
       utterance.lang = 'zh-TW';
       window.speechSynthesis.speak(utterance);
     }
@@ -281,6 +289,25 @@
       }
     }
     
+    // 新增送出答案按鈕的功能：檢查答案是否正確，答對則唸出完整句子，答錯則唸出「對不起你錯」
+    function submitAnswer() {
+      const answerContainer = document.getElementById("answerContainer");
+      let slots = answerContainer.children;
+      let complete = true;
+      for (let i = 0; i < slots.length; i++) {
+        let slot = slots[i];
+        if (slot.children.length === 0 || !slot.classList.contains("correct")) {
+          complete = false;
+          break;
+        }
+      }
+      if (complete) {
+        speak(originalSentence);
+      } else {
+        speak("對不起你錯");
+      }
+    }
+    
     // 顯示灑花動畫：confetti 從畫面四處隨機位置出現，並由小而大擴散
     function showConfetti() {
       const confettiContainer = document.getElementById("confetti-container");
@@ -314,6 +341,11 @@
       const colors = ["#f94144", "#f3722c", "#f8961e", "#f9c74f", "#90be6d", "#43aa8b", "#577590"];
       return colors[Math.floor(Math.random() * colors.length)];
     }
+    
+    // 為了確保語音清單正確加載，有時需要監聽 voiceschanged 事件
+    window.speechSynthesis.onvoiceschanged = function() {
+      window.speechSynthesis.getVoices();
+    };
     
   </script>
 </body>
