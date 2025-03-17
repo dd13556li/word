@@ -105,7 +105,7 @@
     <h3>你的答案</h3>
     <div id="answerContainer" class="dropzone"></div>
     
-    <!-- 新增送出答案按鈕 -->
+    <!-- 送出答案按鈕 -->
     <button onclick="submitAnswer()">送出答案</button>
   </div>
   
@@ -114,7 +114,7 @@
   <!-- 正確與錯誤音效 -->
   <audio id="correctSound" src="correct.mp3"></audio>
   <audio id="errorSound" src="error.mp3"></audio>
-  <!-- 完成後的音效 -->
+  <!-- 成功後的音效 -->
   <audio id="successSound" src="success.mp3"></audio>
   
   <script>
@@ -205,7 +205,7 @@
       return btn;
     }
     
-    // 拖拉開始：播放該字語音
+    // 拖拉開始：播放該字的語音
     function dragStartHandler(e) {
       // 若已鎖定則不允許拖拉
       if (e.target.getAttribute("draggable") === "false") {
@@ -225,23 +225,37 @@
     function dropOnAnswerHandler(e) {
       e.preventDefault();
       const slot = e.currentTarget;
-      // 若此答案框已有字詞則不接受
-      if (slot.children.length > 0) return;
       
+      // 如果此答案格已有字詞，檢查是否為錯誤答案
+      if (slot.children.length > 0) {
+        if (slot.classList.contains("correct")) {
+          // 正確答案不可替換
+          return;
+        } else {
+          // 若是錯誤答案，先將原字詞移回題目區
+          let existingLetter = slot.firstElementChild;
+          existingLetter.style.backgroundColor = "";
+          existingLetter.style.border = "";
+          const scrambledContainer = document.getElementById("scrambledContainer");
+          scrambledContainer.appendChild(existingLetter);
+          slot.innerHTML = "";
+        }
+      }
+      
+      // 從資料傳遞取得拖拉字詞 id
       const letterId = e.dataTransfer.getData("text/plain");
       const letterElement = document.getElementById(letterId);
       slot.appendChild(letterElement);
-      
-      // 將字詞元素背景及邊框設為透明，讓答案框原有背景完整呈現
+      // 設定拖拉後的樣式
       letterElement.style.backgroundColor = "transparent";
       letterElement.style.border = "none";
       
-      // 根據該位置應有的字判斷正確與否
+      // 檢查該位置的正確性
       const index = parseInt(slot.dataset.index);
       if(letterElement.innerText === originalSentence[index]) {
         slot.classList.remove("incorrect");
         slot.classList.add("correct");
-        // 鎖定正確字詞（不可再拖動）
+        // 鎖定正確字詞，避免後續更換
         letterElement.setAttribute("draggable", "false");
         playSound("correctSound");
       } else {
@@ -249,8 +263,6 @@
         slot.classList.add("incorrect");
         playSound("errorSound");
       }
-      
-      checkCompletion();
     }
     
     // 當拖拉字詞放回題目區
@@ -260,36 +272,23 @@
       const letterId = e.dataTransfer.getData("text/plain");
       const letterElement = document.getElementById(letterId);
       
-      // 若原先在答案區，則清除其答案框的樣式
+      // 若原先在答案區，則清除該格的樣式
       const parent = letterElement.parentElement;
       if (parent && parent.classList.contains("answer-slot")) {
         parent.classList.remove("correct", "incorrect");
       }
-      // 恢復原本按鈕樣式
+      // 恢復按鈕樣式並放回題目區
       letterElement.style.backgroundColor = "";
       letterElement.style.border = "";
       scrambledContainer.appendChild(letterElement);
     }
     
-    // 檢查答案是否完成（所有答案框皆正確）
-    function checkCompletion() {
-      const answerContainer = document.getElementById("answerContainer");
-      let slots = answerContainer.children;
-      let complete = true;
-      for (let i = 0; i < slots.length; i++) {
-        let slot = slots[i];
-        if(slot.children.length === 0 || !slot.classList.contains("correct")) {
-          complete = false;
-          break;
-        }
-      }
-      if(complete) {
-        showConfetti();
-        playSound("successSound");
-      }
-    }
-    
-    // 新增送出答案按鈕的功能：檢查答案是否正確，答對則唸出完整句子，答錯則唸出「對不起你錯」
+    // 送出答案：僅在按下「送出答案」時檢查答案
+    // 答對時，依序執行：
+    // 1. 播放成功音效與灑花動畫
+    // 2. 說出「恭喜你答對了。」
+    // 3. 說出「正確的句字是」，再說出原本正確排列的句子
+    // 答錯時，則說出：「對不起，你答錯了，請再試一次」
     function submitAnswer() {
       const answerContainer = document.getElementById("answerContainer");
       let slots = answerContainer.children;
@@ -302,23 +301,49 @@
         }
       }
       if (complete) {
-        speak(originalSentence);
+        // 先播放成功動畫與音效
+        playSound("successSound");
+        showConfetti();
+        
+        // 建立連續語音的各段訊息
+        let utterance1 = new SpeechSynthesisUtterance("恭喜你答對了。");
+        let utterance2 = new SpeechSynthesisUtterance("正確的句字是");
+        let utterance3 = new SpeechSynthesisUtterance(originalSentence);
+        
+        // 設定語言與嘗試使用語言為 zh-TW 且名稱中包含 "Google" 的語音
+        utterance1.lang = "zh-TW";
+        utterance2.lang = "zh-TW";
+        utterance3.lang = "zh-TW";
+        let voices = window.speechSynthesis.getVoices();
+        let selectedVoice = voices.find(v => v.lang === 'zh-TW' && v.name.includes("Google"));
+        if(selectedVoice){
+          utterance1.voice = selectedVoice;
+          utterance2.voice = selectedVoice;
+          utterance3.voice = selectedVoice;
+        }
+        
+        // 以連鎖方式依序播放語音
+        utterance1.onend = function() {
+          window.speechSynthesis.speak(utterance2);
+        };
+        utterance2.onend = function() {
+          window.speechSynthesis.speak(utterance3);
+        };
+        window.speechSynthesis.speak(utterance1);
       } else {
-        speak("對不起你錯");
+        speak("對不起，你答錯了，請再試一次");
       }
     }
     
-    // 顯示灑花動畫：confetti 從畫面四處隨機位置出現，並由小而大擴散
+    // 顯示灑花動畫：confetti 從畫面隨機位置出現，由小變大後淡出
     function showConfetti() {
       const confettiContainer = document.getElementById("confetti-container");
       for(let i = 0; i < 100; i++){
         let confetti = document.createElement("div");
         confetti.className = "confetti";
-        // 隨機位置於整個畫面
         confetti.style.left = Math.random() * window.innerWidth + "px";
         confetti.style.top = Math.random() * window.innerHeight + "px";
         
-        // 隨機方向與距離
         let angle = Math.random() * 2 * Math.PI;
         let distance = Math.random() * 500;
         let tx = Math.cos(angle) * distance;
@@ -330,7 +355,6 @@
         confetti.style.animationDelay = Math.random() * 1 + "s";
         confettiContainer.appendChild(confetti);
       }
-      // 3 秒後清除灑花
       setTimeout(() => {
         confettiContainer.innerHTML = "";
       }, 3000);
@@ -342,7 +366,7 @@
       return colors[Math.floor(Math.random() * colors.length)];
     }
     
-    // 為了確保語音清單正確加載，有時需要監聽 voiceschanged 事件
+    // 為了確保語音清單正確加載，監聽 voiceschanged 事件
     window.speechSynthesis.onvoiceschanged = function() {
       window.speechSynthesis.getVoices();
     };
